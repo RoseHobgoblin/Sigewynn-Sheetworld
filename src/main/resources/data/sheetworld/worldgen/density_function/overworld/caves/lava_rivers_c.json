@@ -1,0 +1,6 @@
+{
+	"type": "minecraft:noise",
+	"noise": "sheetworld:caves/lava_rivers_c",
+	"xz_scale": 0.77,
+	"y_scale": 0.0
+}

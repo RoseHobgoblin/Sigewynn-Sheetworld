@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:abs",
+  "argument": {
+    "type": "minecraft:noise",
+    "noise": "sheetworld:erosion/ranges",
+    "xz_scale": 0.25,
+    "y_scale": 0.0
+  }
+}

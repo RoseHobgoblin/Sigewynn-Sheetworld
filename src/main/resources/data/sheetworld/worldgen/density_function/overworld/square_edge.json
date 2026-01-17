@@ -1,5 +1,5 @@
 {
-  "_comment": "Maps square distance to continentalness - same values as Larion disc_edge",
+  "_comment": "Maps square distance to continentalness - same values as sheetworld disc_edge",
   "type": "minecraft:spline",
   "spline": {
     "coordinate": "sheetworld:overworld/square",

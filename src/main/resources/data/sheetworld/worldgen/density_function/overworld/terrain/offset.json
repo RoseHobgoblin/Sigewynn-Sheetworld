@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:flat_cache",
+  "argument": {
+    "type": "minecraft:cache_2d",
+    "argument": {
+      "type": "minecraft:mul",
+      "note": "Depth range divided by world height in blocks",
+      "argument1": 0.00390625,
+      "argument2": {
+        "type": "minecraft:add",
+        "argument1": -0.3168897689123,
+        "argument2": {
+          "type": "minecraft:add",
+          "argument1": "sheetworld:overworld/terrain/base_height",
+          "argument2": "sheetworld:overworld/terrain/features"
+        }
+      }
+    }
+  }
+}

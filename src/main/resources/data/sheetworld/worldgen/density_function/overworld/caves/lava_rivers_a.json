@@ -1,0 +1,9 @@
+{
+	"type": "minecraft:cache_once",
+	"argument": {
+		"type": "minecraft:noise",
+		"noise": "sheetworld:caves/lava_rivers_a",
+		"xz_scale": 0.77,
+		"y_scale": 0.0
+	}
+}
