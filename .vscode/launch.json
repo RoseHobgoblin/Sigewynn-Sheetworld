@@ -1,0 +1,71 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Client",
+      "presentation": {
+        "group": "Mod Development - sheetworld",
+        "order": 0
+      },
+      "projectName": "sheetworld",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@D:\\Documents\\Forgemods\\Sigewynn-Sheetworld\\build\\moddev\\clientRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@D:\\Documents\\Forgemods\\Sigewynn-Sheetworld\\build\\moddev\\clientRunVmArgs.txt",
+        "-Dfml.modFolders\u003dsheetworld%%D:\\Documents\\Forgemods\\Sigewynn-Sheetworld\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Data",
+      "presentation": {
+        "group": "Mod Development - sheetworld",
+        "order": 1
+      },
+      "projectName": "sheetworld",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@D:\\Documents\\Forgemods\\Sigewynn-Sheetworld\\build\\moddev\\dataRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@D:\\Documents\\Forgemods\\Sigewynn-Sheetworld\\build\\moddev\\dataRunVmArgs.txt",
+        "-Dfml.modFolders\u003dsheetworld%%D:\\Documents\\Forgemods\\Sigewynn-Sheetworld\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Server",
+      "presentation": {
+        "group": "Mod Development - sheetworld",
+        "order": 2
+      },
+      "projectName": "sheetworld",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@D:\\Documents\\Forgemods\\Sigewynn-Sheetworld\\build\\moddev\\serverRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@D:\\Documents\\Forgemods\\Sigewynn-Sheetworld\\build\\moddev\\serverRunVmArgs.txt",
+        "-Dfml.modFolders\u003dsheetworld%%D:\\Documents\\Forgemods\\Sigewynn-Sheetworld\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    }
+  ]
+}
