@@ -5,6 +5,8 @@ import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.sheetworld.Sheetworld;
 import com.sheetworld.climate.BiomeRegistry;
+import com.sheetworld.climate.TerrainBiomeSelector;
+import com.sheetworld.climate.TerrainParameters;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.registries.Registries;
@@ -34,27 +36,72 @@ import java.util.stream.Stream;
  *                     ↓
  *                HYPERNOTIA (bottom face, polar)
  * 
- * CLIMATE MODEL (Three-axis system):
+ * =============================================================================
+ * BIOME SELECTION: TWO-PHASE SYSTEM
+ * =============================================================================
+ * 
+ * PHASE 1: TERRAIN LOOKUP TABLE (hard gates)
+ *   Vanilla parameters (continentalness, erosion, PV) determine terrain CATEGORY:
+ *   
+ *   CONTINENTALNESS → Ocean vs Land
+ *     < -1.05  → Mushroom islands (rare, isolated)
+ *     < -0.455 → Deep ocean
+ *     < -0.19  → Ocean
+ *     < -0.11  → Coast (beaches, cliffs, mangroves)
+ *     ≥ -0.11  → Land
+ *   
+ *   PV (Peaks & Valleys) + EROSION → Terrain shape
+ *     VALLEYS → Rivers
+ *     PEAKS + low erosion → Mountain peaks
+ *     HIGH + low erosion → Mountain slopes
+ *     MID/HIGH + erosion 5 → Windswept/shattered
+ *     Everything else → Normal land (climate decides)
+ * 
+ * PHASE 2: CLIMATE SELECTION (soft scoring)
+ *   Within each terrain category, our physics-based climate picks the biome.
+ *   This is where our custom system shines!
+ * 
+ * =============================================================================
+ * CLIMATE MODEL (Three-axis system)
+ * =============================================================================
  * 
  * 1. TEMPERATURE: Based on LATITUDE (N-S distance from center)
  *    - Center (Z=0) = equator = hottest (+1)
  *    - N/S edges = facing polar faces = coldest (-1)
  *    - Formula: T = 1 - 2 * (|z|/halfSize)^1.3
+ *    - The exponent 1.3 keeps the tropical zone wider, matching Earth
  * 
  * 2. HUMIDITY: Air moisture content
  *    - Base level from temperature (warm air holds more moisture)
  *    - Coastal boost (ocean proximity = more humid air)
  *    - Inland drying (continental interiors are dry)
+ *    - Subtropical drying (high pressure at ~30% latitude)
  *    - Affects vegetation lushness, "feel" of biome
+ *    - NOT the same as precipitation!
  * 
  * 3. PRECIPITATION: Rainfall amount
- *    - Wind patterns create checkerboard (planetary lungs)
- *    - Convergence zones (ITCZ, polar fronts) = more rain
- *    - Subtropical highs (~30% latitude) = DESERTS
- *    - Determines biome type on dry↔wet axis
+ *    - Wind patterns create the "planetary lungs" checkerboard:
+ *      * Hadley cell (0-30%): Trade winds FROM east → East=wet, West=dry
+ *      * Ferrel cell (30-60%): Westerlies FROM west → West=wet, East=dry
+ *      * Polar cell (60-100%): Easterlies FROM east → East=wet, West=dry
+ *    - Convergence zones add rain:
+ *      * ITCZ at equator = trade winds converge = RAINFORESTS
+ *      * Polar front at ~60% = storms
+ *    - Subtropical HIGH at ~30% = air descends = NO RAIN = DESERTS!
+ *    - This is the primary driver of the desert↔rainforest axis
  * 
- * BIOME SELECTION:
- * Uses BiomeRegistry for plug-and-play modded biome support.
+ * =============================================================================
+ * MODDED BIOME SUPPORT
+ * =============================================================================
+ * 
+ * The BiomeRegistry allows modded biomes to seamlessly integrate:
+ * - Biomes register with their climate preferences (temp/humid/precip ranges)
+ * - Higher priority modded biomes win over vanilla when climate matches
+ * - Gap-filling biomes (like Atmospheric's Scrubland) slide into niches
+ *   that vanilla leaves empty
+ * 
+ * Example: Plains → Scrubland → Desert transition becomes smooth when
+ * Atmospheric is installed, instead of the hard Plains→Desert jump.
  */
 public class SheetworldBiomeSource extends BiomeSource {
     
@@ -69,27 +116,28 @@ public class SheetworldBiomeSource extends BiomeSource {
     private final int worldSize;
     private final int halfSize;
     
-    // The registry that handles biome selection
+    // The biome selection systems
     private final BiomeRegistry biomeRegistry;
+    private final TerrainBiomeSelector terrainSelector;
     
     // === CIRCULATION CELL BOUNDARIES (as fraction of distance to N/S edge) ===
+    // These define where wind patterns change, creating the "planetary lungs"
     private static final double HADLEY_END = 0.30;    // Trade winds end / Subtropical high
     private static final double FERREL_END = 0.60;    // Westerlies end / Polar front
     // Beyond FERREL_END is polar easterlies
     
-    // === OCEAN THRESHOLDS (tightened for realistic coastlines) ===
-    private static final float DEEP_OCEAN_THRESHOLD = -0.45f;
-    private static final float OCEAN_THRESHOLD = -0.10f;
-    private static final float COAST_THRESHOLD = -0.02f;   // Very narrow beach band
-    private static final float INLAND_THRESHOLD = 0.4f;    // Where continental drying kicks in
+    // === HUMIDITY THRESHOLD ===
+    // Continental drying kicks in past this continentalness value
+    private static final float INLAND_THRESHOLD = 0.3f;
     
     public SheetworldBiomeSource(HolderGetter<Biome> biomeGetter, int worldSize) {
         this.biomeGetter = biomeGetter;
         this.worldSize = worldSize;
         this.halfSize = worldSize / 2;
         
-        // Initialize the biome registry with all available biomes
+        // Initialize the biome systems
         this.biomeRegistry = new BiomeRegistry(biomeGetter);
+        this.terrainSelector = new TerrainBiomeSelector(biomeRegistry);
         
         Sheetworld.LOGGER.info("Cubeworld BiomeSource created: worldSize={}, halfSize={}", worldSize, halfSize);
     }
@@ -101,57 +149,7 @@ public class SheetworldBiomeSource extends BiomeSource {
     
     @Override
     protected Stream<Holder<Biome>> collectPossibleBiomes() {
-        // Return all vanilla biomes that might be used
-        return Stream.of(
-            // Hot
-            biomeGetter.getOrThrow(Biomes.DESERT),
-            biomeGetter.getOrThrow(Biomes.BADLANDS),
-            biomeGetter.getOrThrow(Biomes.ERODED_BADLANDS),
-            biomeGetter.getOrThrow(Biomes.WOODED_BADLANDS),
-            biomeGetter.getOrThrow(Biomes.SAVANNA),
-            biomeGetter.getOrThrow(Biomes.SAVANNA_PLATEAU),
-            biomeGetter.getOrThrow(Biomes.JUNGLE),
-            biomeGetter.getOrThrow(Biomes.SPARSE_JUNGLE),
-            biomeGetter.getOrThrow(Biomes.BAMBOO_JUNGLE),
-            biomeGetter.getOrThrow(Biomes.MANGROVE_SWAMP),
-            // Warm
-            biomeGetter.getOrThrow(Biomes.PLAINS),
-            biomeGetter.getOrThrow(Biomes.SUNFLOWER_PLAINS),
-            biomeGetter.getOrThrow(Biomes.FOREST),
-            biomeGetter.getOrThrow(Biomes.FLOWER_FOREST),
-            biomeGetter.getOrThrow(Biomes.BIRCH_FOREST),
-            biomeGetter.getOrThrow(Biomes.DARK_FOREST),
-            biomeGetter.getOrThrow(Biomes.SWAMP),
-            // Cool
-            biomeGetter.getOrThrow(Biomes.MEADOW),
-            biomeGetter.getOrThrow(Biomes.CHERRY_GROVE),
-            biomeGetter.getOrThrow(Biomes.OLD_GROWTH_BIRCH_FOREST),
-            // Cold
-            biomeGetter.getOrThrow(Biomes.TAIGA),
-            biomeGetter.getOrThrow(Biomes.OLD_GROWTH_SPRUCE_TAIGA),
-            biomeGetter.getOrThrow(Biomes.OLD_GROWTH_PINE_TAIGA),
-            // Freezing
-            biomeGetter.getOrThrow(Biomes.SNOWY_PLAINS),
-            biomeGetter.getOrThrow(Biomes.SNOWY_TAIGA),
-            biomeGetter.getOrThrow(Biomes.GROVE),
-            biomeGetter.getOrThrow(Biomes.ICE_SPIKES),
-            biomeGetter.getOrThrow(Biomes.SNOWY_SLOPES),
-            // Beach/Coast
-            biomeGetter.getOrThrow(Biomes.BEACH),
-            biomeGetter.getOrThrow(Biomes.SNOWY_BEACH),
-            biomeGetter.getOrThrow(Biomes.STONY_SHORE),
-            // Ocean
-            biomeGetter.getOrThrow(Biomes.WARM_OCEAN),
-            biomeGetter.getOrThrow(Biomes.LUKEWARM_OCEAN),
-            biomeGetter.getOrThrow(Biomes.OCEAN),
-            biomeGetter.getOrThrow(Biomes.COLD_OCEAN),
-            biomeGetter.getOrThrow(Biomes.FROZEN_OCEAN),
-            // Deep Ocean
-            biomeGetter.getOrThrow(Biomes.DEEP_LUKEWARM_OCEAN),
-            biomeGetter.getOrThrow(Biomes.DEEP_OCEAN),
-            biomeGetter.getOrThrow(Biomes.DEEP_COLD_OCEAN),
-            biomeGetter.getOrThrow(Biomes.DEEP_FROZEN_OCEAN)
-        );
+        return biomeRegistry.collectAllPossibleBiomes();
     }
     
     // ==================== MAIN BIOME SELECTION ====================
@@ -165,31 +163,25 @@ public class SheetworldBiomeSource extends BiomeSource {
         // Check if outside world bounds - return ocean
         if (Math.abs(x) > halfSize || Math.abs(z) > halfSize) {
             double temp = getTemperature(z);
-            return biomeRegistry.selectOceanBiome(temp, 0.5, 0.5);
+            return biomeRegistry.selectOceanBiome(temp);
         }
         
-        // Sample continentalness from the density function system
+        // Sample vanilla terrain parameters from density functions
         Climate.TargetPoint target = sampler.sample(quartX, quartY, quartZ);
         float continentalness = Climate.unquantizeCoord(target.continentalness());
+        float erosion = Climate.unquantizeCoord(target.erosion());
+        float weirdness = Climate.unquantizeCoord(target.weirdness());
         
-        // Calculate all climate values
+        // Calculate our physics-based climate values
         double temperature = getTemperature(z);
         double humidity = getHumidity(x, z, continentalness);
         double precipitation = getPrecipitation(x, z);
         
-        // Select biome based on continentalness and climate
-        if (continentalness < DEEP_OCEAN_THRESHOLD) {
-            return biomeRegistry.selectOceanBiome(temperature, humidity, precipitation);
-        }
-        if (continentalness < OCEAN_THRESHOLD) {
-            return biomeRegistry.selectOceanBiome(temperature, humidity, precipitation);
-        }
-        if (continentalness < COAST_THRESHOLD) {
-            return biomeRegistry.selectCoastBiome(temperature, humidity, precipitation);
-        }
-        
-        // Land biome - use registry for best fit
-        return biomeRegistry.selectLandBiome(temperature, humidity, precipitation);
+        // Use terrain lookup + climate scoring to select biome
+        return terrainSelector.selectBiome(
+            continentalness, erosion, weirdness,
+            temperature, humidity, precipitation
+        );
     }
     
     // ==================== TEMPERATURE ====================
@@ -197,7 +189,15 @@ public class SheetworldBiomeSource extends BiomeSource {
     /**
      * Calculate temperature based on LATITUDE (Z coordinate).
      * 
-     * Range: -1 (polar) to +1 (equatorial)
+     * This models the basic physics of a rotating cube:
+     * - The equator (Z=0) receives the most direct sunlight
+     * - The poles (Z=±halfSize) receive oblique sunlight
+     * 
+     * The exponent 1.3 creates a wider tropical zone, similar to Earth
+     * where the tropics extend to about 23.5° latitude.
+     * 
+     * @param z the Z coordinate (north-south position)
+     * @return temperature from +1 (tropical equator) to -1 (polar edge)
      */
     private double getTemperature(int z) {
         double latitude = Math.abs(z) / (double) halfSize;
@@ -211,14 +211,18 @@ public class SheetworldBiomeSource extends BiomeSource {
      * Calculate humidity - the moisture content of the air.
      * 
      * This affects vegetation lushness and the "feel" of biomes.
-     * NOT the same as precipitation (rainfall).
+     * NOT the same as precipitation (rainfall)!
+     * 
+     * A coastal desert can have humid air (fog) but no rain.
+     * An inland forest can have dry air but regular rain.
      * 
      * Factors:
-     * 1. Temperature: Warm air CAN hold more moisture, but doesn't always
-     * 2. Ocean proximity: Coastal areas have humid air
-     * 3. Continental interior: Deep inland = dry air
+     * 1. Temperature: Warm air CAN hold more moisture (Clausius-Clapeyron)
+     * 2. Ocean proximity: Coastal areas have humid air (moisture source)
+     * 3. Continental interior: Deep inland = dry air (moisture depleted)
+     * 4. Subtropical high: Air descending at ~30% latitude is dry
      * 
-     * Range: 0.0 (bone dry) to 1.0 (saturated)
+     * @return humidity from 0.0 (bone dry) to 1.0 (saturated)
      */
     private double getHumidity(int x, int z, float continentalness) {
         double temp = getTemperature(z);
@@ -231,12 +235,13 @@ public class SheetworldBiomeSource extends BiomeSource {
         // Coastal boost: ocean is a moisture source
         // Near ocean (low continentalness) = humid air
         double coastalEffect = 0.0;
-        if (continentalness < COAST_THRESHOLD) {
+        if (continentalness < TerrainParameters.COAST_THRESHOLD) {
             // Right at coast - very humid
             coastalEffect = 0.25;
         } else if (continentalness < INLAND_THRESHOLD) {
             // Gradual decrease from coast to inland
-            double t = (continentalness - COAST_THRESHOLD) / (INLAND_THRESHOLD - COAST_THRESHOLD);
+            double t = (continentalness - TerrainParameters.COAST_THRESHOLD) / 
+                       (INLAND_THRESHOLD - TerrainParameters.COAST_THRESHOLD);
             coastalEffect = 0.25 * (1.0 - t);
         } else {
             // Deep inland - continental drying (DRY air)
@@ -262,17 +267,23 @@ public class SheetworldBiomeSource extends BiomeSource {
      * 
      * This is the PRIMARY driver of biome type on the desert↔rainforest axis.
      * 
-     * Factors:
-     * 1. Wind patterns: The checkerboard effect (planetary lungs)
-     *    - Upwind edges receive moisture = WET
-     *    - Downwind edges lose moisture = DRY
-     * 2. Convergence zones: Where air masses meet = uplift = RAIN
-     *    - ITCZ at equator (trade winds converge) = RAINFOREST
-     *    - Polar front at ~60% = storms
-     * 3. Subtropical HIGH: Air DESCENDS = NO RAIN = DESERTS
-     *    - This is the most important factor for creating deserts!
+     * THE PLANETARY LUNGS:
+     * Air flows between cube faces in circulation cells, carrying moisture.
+     * Where air ARRIVES (upwind edge) = wet
+     * Where air DEPARTS (downwind edge) = dry
+     * This creates a checkerboard pattern across the world!
      * 
-     * Range: 0.0 (no rain) to 1.0 (constant rain)
+     * CONVERGENCE ZONES:
+     * Where air masses meet, they're forced upward, cool, and release moisture.
+     * - ITCZ at equator: Trade winds from N and S converge = RAINFORESTS
+     * - Polar front at ~60%: Warm Ferrel air meets cold Polar air = storms
+     * 
+     * THE DESERT MAKER:
+     * At ~30% latitude, air from the Hadley cell DESCENDS.
+     * Descending air warms, holds onto its moisture = NO RAIN.
+     * This creates the Sahara, Arabian, Sonoran, Australian deserts IRL.
+     * 
+     * @return precipitation from 0.0 (no rain) to 1.0 (constant rain)
      */
     private double getPrecipitation(int x, int z) {
         double latitude = Math.abs(z) / (double) halfSize;
@@ -299,6 +310,7 @@ public class SheetworldBiomeSource extends BiomeSource {
         double precipitation = 0.5 + (windEffect * 0.3) + zonalEffect + localVariation;
         
         // Polar dampening - cold regions get less precipitation overall
+        // (Cold air holds less moisture, even when it does precipitate)
         if (latitude > FERREL_END) {
             double polarFactor = (latitude - FERREL_END) / (1.0 - FERREL_END);
             precipitation = precipitation * (1.0 - polarFactor * 0.4);
@@ -314,6 +326,10 @@ public class SheetworldBiomeSource extends BiomeSource {
      * - Hadley (0-30%): Trade winds FROM east → East=wet, West=dry
      * - Ferrel (30-60%): Westerlies FROM west → West=wet, East=dry
      * - Polar (60-100%): Easterlies FROM east → East=wet, West=dry
+     * 
+     * This creates a CHECKERBOARD pattern:
+     *   - NE and SW quadrants tend wet (upwind)
+     *   - NW and SE quadrants tend dry (downwind)
      * 
      * @return -1 (downwind/dry) to +1 (upwind/wet)
      */
@@ -380,6 +396,9 @@ public class SheetworldBiomeSource extends BiomeSource {
     
     /**
      * Smooth transitions between circulation cells.
+     * 
+     * Without smoothing, there would be hard lines at 30% and 60% latitude
+     * where precipitation abruptly changes. This creates gradual transitions.
      */
     private double smoothCellTransitions(double windEffect, double latitude, double longitude) {
         double transitionWidth = 0.08;
@@ -407,11 +426,19 @@ public class SheetworldBiomeSource extends BiomeSource {
     
     // ==================== UTILITY FUNCTIONS ====================
     
+    /**
+     * Attempt at smoothstep function for smoother interpolation.
+     * Maps [0,1] to [0,1] with zero derivative at endpoints.
+     */
     private double smoothstep(double t) {
         t = clamp(t, 0.0, 1.0);
         return t * t * (3 - 2 * t);
     }
     
+    /**
+     * Local variation using pseudo-noise for organic patterns.
+     * Creates small-scale variation so biome boundaries aren't perfectly straight.
+     */
     private double getLocalVariation(int x, int z, double freqX, double freqZ) {
         double h1 = Math.sin(x * freqX + z * freqZ) * 0.5;
         double h2 = Math.sin(x * freqX * 1.7 - z * freqZ * 1.3 + 1.7) * 0.3;
@@ -419,6 +446,9 @@ public class SheetworldBiomeSource extends BiomeSource {
         return h1 + h2 + h3;
     }
     
+    /**
+     * Clamp a value between min and max.
+     */
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -440,15 +470,9 @@ public class SheetworldBiomeSource extends BiomeSource {
         else if (latitude < FERREL_END) windZone = "Ferrel";
         else windZone = "Polar";
         
-        String terrainType;
-        if (continentalness < DEEP_OCEAN_THRESHOLD) terrainType = "DeepOcean";
-        else if (continentalness < OCEAN_THRESHOLD) terrainType = "Ocean";
-        else if (continentalness < COAST_THRESHOLD) terrainType = "Coast";
-        else terrainType = "Land";
-        
         return String.format(
-            "Lat:%.2f Lon:%.2f | T:%.2f H:%.2f P:%.2f | %s | Cont:%.2f(%s)",
-            latitude, longitude, temp, humid, precip, windZone, continentalness, terrainType
+            "Lat:%.2f Lon:%.2f | T:%.2f H:%.2f P:%.2f | %s | Cont:%.2f",
+            latitude, longitude, temp, humid, precip, windZone, continentalness
         );
     }
     
