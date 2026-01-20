@@ -1,0 +1,16 @@
+{
+  "selector": {
+    "type": "names",
+    "config": [
+      "environmental:blueprint/modded_biome_slices/pine_barrens",
+      "environmental:blueprint/modded_biome_slices/marsh",
+      "environmental:blueprint/modded_biome_slices/blossom"
+    ]
+  },
+  "molding": "json",
+  "remolder": {
+    "type": "replace",
+    "target": "weight",
+    "value": 0
+  }
+}

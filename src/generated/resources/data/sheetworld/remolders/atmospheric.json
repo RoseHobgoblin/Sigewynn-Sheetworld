@@ -1,0 +1,19 @@
+{
+  "selector": {
+    "type": "names",
+    "config": [
+      "atmospheric:blueprint/modded_biome_slices/aspen",
+      "atmospheric:blueprint/modded_biome_slices/dunes_and_scrubland",
+      "atmospheric:blueprint/modded_biome_slices/kousa",
+      "atmospheric:blueprint/modded_biome_slices/laurel",
+      "atmospheric:blueprint/modded_biome_slices/rainforest",
+      "atmospheric:blueprint/modded_biome_slices/spiny_thicket"
+    ]
+  },
+  "molding": "json",
+  "remolder": {
+    "type": "replace",
+    "target": "weight",
+    "value": 0
+  }
+}
