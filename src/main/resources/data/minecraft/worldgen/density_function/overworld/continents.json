@@ -1,9 +1,0 @@
-{
-  "_comment": "Override vanilla continents completely with our square world edge",
-  "type": "minecraft:flat_cache",
-  "argument": {
-    "type": "minecraft:cache_2d",    
-    "argument": "sheetworld:overworld/continents",
-    "argument1": "sheetworld:overworld/square_edge"
-  }
-}
