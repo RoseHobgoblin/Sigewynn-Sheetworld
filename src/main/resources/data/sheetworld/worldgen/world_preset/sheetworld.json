@@ -1,14 +1,14 @@
 {
   "dimensions": {
     "minecraft:overworld": {
-      "type": "minecraft:overworld",
+      "type": "sheetworld:sheetworld",
       "generator": {
         "type": "minecraft:noise",
         "biome_source": {
           "type": "sheetworld:sheetworld",
           "world_size": 10000
         },
-        "settings": "minecraft:overworld"
+        "settings": "sheetworld:sheetworld"
       }
     },
     "minecraft:the_nether": {

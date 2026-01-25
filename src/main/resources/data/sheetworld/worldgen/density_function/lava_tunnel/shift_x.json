@@ -1,0 +1,6 @@
+{
+  "type": "minecraft:noise",
+  "noise": "sheetworld:lava_tunnel/shift_x",
+  "xz_scale": 1,
+  "y_scale": 0
+}

@@ -1,0 +1,6 @@
+{
+  "type": "minecraft:noise",
+  "noise": "sheetworld:underground_river/roof_sharpness",
+  "xz_scale": 1,
+  "y_scale": 1
+}

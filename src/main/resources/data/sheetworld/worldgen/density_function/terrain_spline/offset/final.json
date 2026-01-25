@@ -1,0 +1,64 @@
+{
+  "type": "minecraft:flat_cache",
+  "argument": {
+    "type": "minecraft:cache_2d",
+    "argument": {
+      "type": "minecraft:add",
+      "argument1": {
+        "type": "minecraft:mul",
+        "argument1": {
+          "type": "minecraft:blend_offset"
+        },
+        "argument2": {
+          "type": "minecraft:add",
+          "argument1": 1,
+          "argument2": {
+            "type": "minecraft:mul",
+            "argument1": -1,
+            "argument2": "sheetworld:blend_alpha"
+          }
+        }
+      },
+      "argument2": {
+        "type": "minecraft:mul",
+        "argument1": {
+          "type": "minecraft:add",
+          "argument1": -0.5037500262260437,
+          "argument2": {
+            "type": "minecraft:max",
+            "argument1": {
+              "type": "minecraft:min",
+              "argument1": {
+                "type": "minecraft:add",
+                "argument1": {
+                  "type": "minecraft:mul",
+                  "argument1": "sheetworld:island_selector",
+                  "argument2": "sheetworld:terrain_spline/offset/islands"
+                },
+                "argument2": {
+                  "type": "minecraft:mul",
+                  "argument1": "sheetworld:continent_selector",
+                  "argument2": {
+                    "type": "minecraft:mul",
+                    "argument1": {
+                      "type": "minecraft:range_choice",
+                      "input": "sheetworld:terrain_spline/offset/continents",
+                      "min_inclusive": 0,
+                      "max_exclusive": 64,
+                      "when_in_range": "sheetworld:__constants/vertical_scale",
+                      "when_out_of_range": 1
+                    },
+                    "argument2": "sheetworld:terrain_spline/offset/continents"
+                  }
+                }
+              },
+              "argument2": "sheetworld:__constants/max_offset"
+            },
+            "argument2": "sheetworld:__constants/min_offset"
+          }
+        },
+        "argument2": "sheetworld:blend_alpha"
+      }
+    }
+  }
+}
