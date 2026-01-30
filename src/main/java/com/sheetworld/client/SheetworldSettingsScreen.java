@@ -176,6 +176,7 @@ public class SheetworldSettingsScreen extends Screen {
             // Create new chunk generator with updated settings
             ChunkGenerator newGenerator = new SheetworldChunkGenerator(
                     registryAccess.lookupOrThrow(Registries.BIOME),
+                    registryAccess.lookupOrThrow(Registries.DENSITY_FUNCTION),
                     settings,
                     noiseSettings
             );

@@ -1,101 +1,135 @@
 package com.sheetworld.climate;
 
-import com.sheetworld.ecoregion.Ecoregion;
-import com.sheetworld.ecoregion.EcoregionBiomePool;
-import com.sheetworld.ecoregion.EcoregionSelector;
+import com.sheetworld.climate.TerrainParameters.ContinentalnessLevel;
+import com.sheetworld.climate.TerrainParameters.PVLevel;
 import net.minecraft.core.Holder;
-import net.minecraft.core.HolderGetter;
 import net.minecraft.world.level.biome.Biome;
-import net.minecraft.world.level.biome.Biomes;
 
 /**
- * Terrain-based biome selection using the ecoregion system.
+ * Terrain-based biome selection using vanilla's lookup table approach.
  * 
- * This bridges the old terrain parameter approach with the new
- * two-level ecoregion selection system.
+ * This implements the hard gate system:
+ * 1. Continentalness determines ocean/coast/land
+ * 2. PV (peaks/valleys) determines terrain shape  
+ * 3. Erosion determines mountain vs flat within each category
+ * 4. Climate (temp/humid/precip) picks the specific biome
  * 
- * HIERARCHY:
- * 1. Ocean/Coast gates (continentalness)
- * 2. Ecoregion selection (temperature, precipitation, elevation)
- * 3. Biome pool selection (local noise, erosion, weirdness)
+ * SIMPLIFIED CATEGORIES:
+ * - Ocean/DeepOcean: Temperature only
+ * - Beach: Coastal + flat + climate (includes mangroves!)
+ * - Cliff: Coastal + rugged
+ * - River: Valleys at any continentalness
+ * - Peak: High PV + low erosion
+ * - Slope: Mountain sides
+ * - Shattered: Windswept terrain
+ * - Land: EVERYTHING ELSE - climate does all the work here
  */
 public class TerrainBiomeSelector {
     
-    private final EcoregionBiomePool biomePool;
-    private final HolderGetter<Biome> biomeGetter;
+    private final BiomeRegistry registry;
     
-    public TerrainBiomeSelector(HolderGetter<Biome> biomeGetter) {
-        this.biomeGetter = biomeGetter;
-        this.biomePool = new EcoregionBiomePool(biomeGetter);
+    public TerrainBiomeSelector(BiomeRegistry registry) {
+        this.registry = registry;
     }
     
     /**
-     * Main selection method.
-     * 
-     * @param continentalness Continentalness value for ocean/land gating
-     * @param erosion Erosion value for biome weight adjustment
-     * @param weirdness Weirdness value for variant selection
-     * @param temperature Temperature (-1 to 1)
-     * @param precipitation Precipitation (0 to 1)
-     * @param elevation Elevation (0 to 1, from mountain ridges)
+     * Main selection method - the lookup table.
      */
     public Holder<Biome> selectBiome(
-            double continentalness, double erosion, double weirdness,
-            double temperature, double precipitation, double elevation) {
+            float continentalness, float erosion, float weirdness,
+            double temp, double humid, double precip) {
         
-        // === OCEAN GATES ===
-        if (continentalness < -0.45) {
-            return selectDeepOceanBiome(temperature);
+        float pv = TerrainParameters.calculatePV(weirdness);
+        ContinentalnessLevel contLevel = TerrainParameters.getContinentalnessLevel(continentalness);
+        PVLevel pvLevel = TerrainParameters.getPVLevel(pv);
+        int erosionLevel = TerrainParameters.getErosionLevel(erosion);
+        
+        // === OCEAN GATES (continentalness only) ===
+        
+        if (contLevel == ContinentalnessLevel.MUSHROOM) {
+            return registry.selectMushroomBiome(temp);
         }
-        if (continentalness < -0.10) {
-            return selectOceanBiome(temperature);
-        }
-        if (continentalness < -0.02) {
-            return selectCoastBiome(temperature);
+        
+        if (contLevel == ContinentalnessLevel.DEEP_OCEAN) {
+            return registry.selectDeepOceanBiome(temp);
         }
         
-        // === LAND - USE ECOREGION SYSTEM ===
+        if (contLevel == ContinentalnessLevel.OCEAN) {
+            return registry.selectOceanBiome(temp);
+        }
         
-        // Select ecoregion based on climate
-        Ecoregion ecoregion = EcoregionSelector.select(temperature, precipitation, elevation);
+        // === COAST ===
         
-        // Select biome from ecoregion pool
-        return biomePool.selectBiome(ecoregion, weirdness, erosion, weirdness);
+        if (contLevel == ContinentalnessLevel.COAST) {
+            return selectCoastalBiome(pvLevel, erosionLevel, temp, humid, precip);
+        }
+        
+        // === RIVERS (valleys at any inland continentalness) ===
+        
+        if (pvLevel == PVLevel.VALLEYS) {
+            return registry.selectRiverBiome(temp, humid, precip);
+        }
+        
+        // === PEAKS (high PV + low erosion) ===
+        
+        if (pvLevel == PVLevel.PEAKS && erosionLevel <= 1) {
+            return registry.selectPeakBiome(temp, humid, precip);
+        }
+        
+        // === SLOPES (mountain sides) ===
+        
+        if ((pvLevel == PVLevel.PEAKS || pvLevel == PVLevel.HIGH) && erosionLevel <= 3) {
+            return registry.selectSlopeBiome(temp, humid, precip);
+        }
+        
+        if (pvLevel == PVLevel.MID && erosionLevel <= 1) {
+            return registry.selectSlopeBiome(temp, humid, precip);
+        }
+        
+        // === SHATTERED (high erosion + mid-high PV = windswept) ===
+        
+        if (erosionLevel == 5 && (pvLevel == PVLevel.MID || pvLevel == PVLevel.HIGH)) {
+            return registry.selectShatteredBiome(temp, humid, precip);
+        }
+        
+        // === LAND (everything else - climate does the work) ===
+        
+        return registry.selectLandBiome(temp, humid, precip);
     }
     
-    // === OCEAN BIOMES ===
-    
-    private Holder<Biome> selectDeepOceanBiome(double temperature) {
-        if (temperature > 0.5) {
-            return biomeGetter.getOrThrow(Biomes.DEEP_LUKEWARM_OCEAN);
-        } else if (temperature > -0.2) {
-            return biomeGetter.getOrThrow(Biomes.DEEP_OCEAN);
-        } else if (temperature > -0.5) {
-            return biomeGetter.getOrThrow(Biomes.DEEP_COLD_OCEAN);
-        } else {
-            return biomeGetter.getOrThrow(Biomes.DEEP_FROZEN_OCEAN);
+    /**
+     * Coastal biome selection.
+     * 
+     * Coast is special because terrain shape matters more:
+     * - Valleys = rivers meeting ocean
+     * - Flat = beaches (including mangroves in hot+wet!)
+     * - Rugged = cliffs/stony shore
+     * - High terrain = land biomes reaching the sea
+     */
+    private Holder<Biome> selectCoastalBiome(PVLevel pvLevel, int erosionLevel,
+            double temp, double humid, double precip) {
+        
+        // Rivers meeting the ocean
+        if (pvLevel == PVLevel.VALLEYS) {
+            return registry.selectRiverBiome(temp, humid, precip);
         }
-    }
-    
-    private Holder<Biome> selectOceanBiome(double temperature) {
-        if (temperature > 0.5) {
-            return biomeGetter.getOrThrow(Biomes.WARM_OCEAN);
-        } else if (temperature > 0.2) {
-            return biomeGetter.getOrThrow(Biomes.LUKEWARM_OCEAN);
-        } else if (temperature > -0.2) {
-            return biomeGetter.getOrThrow(Biomes.OCEAN);
-        } else if (temperature > -0.5) {
-            return biomeGetter.getOrThrow(Biomes.COLD_OCEAN);
-        } else {
-            return biomeGetter.getOrThrow(Biomes.FROZEN_OCEAN);
+        
+        // Peaks/High terrain at coast = land biomes or slopes
+        if (pvLevel == PVLevel.PEAKS) {
+            return registry.selectSlopeBiome(temp, humid, precip);
         }
-    }
-    
-    private Holder<Biome> selectCoastBiome(double temperature) {
-        if (temperature < -0.3) {
-            return biomeGetter.getOrThrow(Biomes.SNOWY_BEACH);
+        
+        if (pvLevel == PVLevel.HIGH) {
+            return registry.selectLandBiome(temp, humid, precip);
+        }
+        
+        // Low/Mid terrain at coast - beaches vs cliffs based on erosion
+        if (erosionLevel <= 2) {
+            // Rugged coast - cliffs
+            return registry.selectCliffBiome(temp, humid, precip);
         } else {
-            return biomeGetter.getOrThrow(Biomes.BEACH);
+            // Flat coast - beaches (mangroves handled inside selectBeachBiome by climate)
+            return registry.selectBeachBiome(temp, humid, precip);
         }
     }
 }

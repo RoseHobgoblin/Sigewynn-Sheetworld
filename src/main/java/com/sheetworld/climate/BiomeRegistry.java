@@ -68,7 +68,55 @@ public class BiomeRegistry {
         Holder<Biome> fallback = fallbackCoastCandidate != null ? fallbackCoastCandidate.getBiome() : null;
         return selectBiome(coastCandidates, temperature, humidity, precipitation, fallback);
     }
-    
+
+    // ==================== TERRAIN BIOME SELECTORS ====================
+    // These are called by TerrainBiomeSelector for specific terrain categories
+
+    public Holder<Biome> selectMushroomBiome(double temp) {
+        return biomeGetter.getOrThrow(Biomes.MUSHROOM_FIELDS);
+    }
+
+    public Holder<Biome> selectDeepOceanBiome(double temp) {
+        if (temp > 0.2) return biomeGetter.getOrThrow(Biomes.DEEP_LUKEWARM_OCEAN);
+        if (temp > -0.2) return biomeGetter.getOrThrow(Biomes.DEEP_OCEAN);
+        if (temp > -0.5) return biomeGetter.getOrThrow(Biomes.DEEP_COLD_OCEAN);
+        return biomeGetter.getOrThrow(Biomes.DEEP_FROZEN_OCEAN);
+    }
+
+    public Holder<Biome> selectRiverBiome(double temp, double humid, double precip) {
+        if (temp < -0.3) return biomeGetter.getOrThrow(Biomes.FROZEN_RIVER);
+        return biomeGetter.getOrThrow(Biomes.RIVER);
+    }
+
+    public Holder<Biome> selectPeakBiome(double temp, double humid, double precip) {
+        if (temp < -0.3) return biomeGetter.getOrThrow(Biomes.FROZEN_PEAKS);
+        if (temp < 0.3) return biomeGetter.getOrThrow(Biomes.JAGGED_PEAKS);
+        return biomeGetter.getOrThrow(Biomes.STONY_PEAKS);
+    }
+
+    public Holder<Biome> selectSlopeBiome(double temp, double humid, double precip) {
+        if (temp < -0.3) return biomeGetter.getOrThrow(Biomes.SNOWY_SLOPES);
+        if (temp < 0.0 && precip > 0.4) return biomeGetter.getOrThrow(Biomes.GROVE);
+        if (temp < 0.3) return biomeGetter.getOrThrow(Biomes.MEADOW);
+        return biomeGetter.getOrThrow(Biomes.SAVANNA_PLATEAU);
+    }
+
+    public Holder<Biome> selectShatteredBiome(double temp, double humid, double precip) {
+        if (temp < -0.2) return biomeGetter.getOrThrow(Biomes.WINDSWEPT_GRAVELLY_HILLS);
+        if (temp < 0.3 && precip > 0.4) return biomeGetter.getOrThrow(Biomes.WINDSWEPT_FOREST);
+        return biomeGetter.getOrThrow(Biomes.WINDSWEPT_HILLS);
+    }
+
+    public Holder<Biome> selectCliffBiome(double temp, double humid, double precip) {
+        return biomeGetter.getOrThrow(Biomes.STONY_SHORE);
+    }
+
+    public Holder<Biome> selectBeachBiome(double temp, double humid, double precip) {
+        if (temp < -0.3) return biomeGetter.getOrThrow(Biomes.SNOWY_BEACH);
+        if (temp > 0.5 && precip > 0.6) return biomeGetter.getOrThrow(Biomes.MANGROVE_SWAMP);
+        return biomeGetter.getOrThrow(Biomes.BEACH);
+    }
+
     private Holder<Biome> selectBiome(List<BiomeCandidate> candidates, 
                                        double temperature, double humidity, double precipitation,
                                        Holder<Biome> fallback) {

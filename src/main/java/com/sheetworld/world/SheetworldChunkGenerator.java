@@ -7,8 +7,6 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.RegistryOps;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.DensityFunction;
@@ -18,15 +16,12 @@ import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 /**
  * Sheetworld Chunk Generator - wraps NoiseBasedChunkGenerator with our settings.
  *
- * Key responsibility: Wire the mountain ridge density function to the biome source
- * so terrain-aware biome selection (peaks, slopes, valleys, stony shores) works.
+ * Terrain-aware biome selection works automatically because:
+ * - noise_settings routes "ridges" to "sheetworld:terrain/mountain_ridges/ridges"
+ * - Climate.Sampler.weirdness() returns the actual terrain height
+ * - No manual wiring needed - it goes through the standard biome infrastructure
  */
 public class SheetworldChunkGenerator extends NoiseBasedChunkGenerator {
-
-    // Key for our mountain ridges density function (the TERRAIN one, not biome_parameter)
-    private static final ResourceKey<DensityFunction> MOUNTAIN_RIDGES_KEY =
-        ResourceKey.create(Registries.DENSITY_FUNCTION,
-            ResourceLocation.fromNamespaceAndPath("sheetworld", "terrain/mountain_ridges/ridges"));
 
     public static final MapCodec<SheetworldChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(instance ->
         instance.group(
@@ -60,29 +55,16 @@ public class SheetworldChunkGenerator extends NoiseBasedChunkGenerator {
     }
 
     /**
-     * Create the biome source with mountain sampler wired up.
-     * This is called from the constructor before super() completes.
+     * Create the biome source.
+     * Terrain-aware biomes work automatically via Climate.Sampler.weirdness()
+     * which is routed to terrain ridges in noise_settings.
      */
     private static SheetworldBiomeSource createBiomeSource(
             HolderGetter<Biome> biomeGetter,
             HolderGetter<DensityFunction> densityFunctionGetter,
             SheetworldSettings settings
     ) {
-        SheetworldBiomeSource biomeSource = new SheetworldBiomeSource(biomeGetter, settings.worldSize().getSize());
-
-        // Wire up the mountain sampler for terrain-aware biome selection
-        try {
-            Holder<DensityFunction> ridgesHolder = densityFunctionGetter.getOrThrow(MOUNTAIN_RIDGES_KEY);
-            DensityFunction ridgesFunction = ridgesHolder.value();
-            biomeSource.setMountainSampler(ridgesFunction);
-            Sheetworld.LOGGER.info("Mountain ridge sampler wired - terrain-aware biomes enabled (peaks, slopes, valleys, stony shores)");
-        } catch (Exception e) {
-            Sheetworld.LOGGER.error("Failed to wire mountain ridge sampler: {} - terrain biomes will use fallback", e.getMessage());
-            // BiomeSource will still work, but all terrainHeight checks will return 0
-            // This means no peaks/slopes/valleys, coasts default to beach
-        }
-
-        return biomeSource;
+        return new SheetworldBiomeSource(biomeGetter, settings.worldSize().getSize());
     }
 
     @Override
