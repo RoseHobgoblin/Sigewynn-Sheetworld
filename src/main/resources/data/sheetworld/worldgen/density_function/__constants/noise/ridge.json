@@ -1,7 +1,7 @@
 {
   "type": "minecraft:shifted_noise",
   "noise": "sheetworld:parameter/ridge",
-  "xz_scale": 1.0,
+  "xz_scale": 0.25,
   "y_scale": 0,
   "shift_x": "minecraft:shift_x",
   "shift_y": 0,

@@ -1,4 +1,11 @@
 {
   "generator.sheetworld.sheetworld": "Sheetworld",
-  "createWorld.customize.sheetworld.title": "Sheetworld Settings"
+  "createWorld.customize.sheetworld.title": "Customize Sheetworld",
+  "createWorld.customize.sheetworld.worldSize": "World Size",
+  "createWorld.customize.sheetworld.verticalScale": "Vertical Scale: %s",
+  "createWorld.customize.sheetworld.features": "Terrain Features",
+  "createWorld.customize.sheetworld.junglePillars": "Jungle Pillars",
+  "createWorld.customize.sheetworld.rollingHills": "Rolling Hills",
+  "createWorld.customize.sheetworld.dunes": "Desert Dunes",
+  "createWorld.customize.sheetworld.badlandsRidges": "Badlands Ridges"
 }

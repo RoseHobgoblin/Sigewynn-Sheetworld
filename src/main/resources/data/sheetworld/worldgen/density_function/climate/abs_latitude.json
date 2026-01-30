@@ -1,5 +1,4 @@
 {
-  "_comment": "Absolute latitude - distance from equator (Z=0). Range: 0 (equator) to 1 (pole)",
   "type": "minecraft:flat_cache",
   "argument": {
     "type": "minecraft:cache_2d",

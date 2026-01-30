@@ -3,12 +3,18 @@
     "minecraft:overworld": {
       "type": "sheetworld:sheetworld",
       "generator": {
-        "type": "minecraft:noise",
-        "biome_source": {
-          "type": "sheetworld:sheetworld",
-          "world_size": 10000
+        "type": "sheetworld:sheetworld",
+        "settings": {
+          "world_size": "medium",
+          "vertical_scale": 1.0,
+          "rain_shadow_strength": 0.7,
+          "mountain_height": 1.2,
+          "jungle_pillars": true,
+          "rolling_hills": true,
+          "dunes": true,
+          "badlands_ridges": true
         },
-        "settings": "sheetworld:sheetworld"
+        "noise_settings": "sheetworld:sheetworld"
       }
     },
     "minecraft:the_nether": {

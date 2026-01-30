@@ -1,5 +1,4 @@
 {
-  "_comment": "Latitude as fraction of world size. Range: -1 (south edge) to +1 (north edge)",
   "type": "minecraft:flat_cache",
   "argument": {
     "type": "minecraft:cache_2d",
