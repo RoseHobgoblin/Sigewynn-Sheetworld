@@ -83,6 +83,14 @@ public class BiomeRegistry {
         return biomeGetter.getOrThrow(Biomes.DEEP_FROZEN_OCEAN);
     }
 
+    public Holder<Biome> selectOceanBiome(double temp) {
+        if (temp > 0.5) return biomeGetter.getOrThrow(Biomes.WARM_OCEAN);
+        if (temp > 0.2) return biomeGetter.getOrThrow(Biomes.LUKEWARM_OCEAN);
+        if (temp > -0.2) return biomeGetter.getOrThrow(Biomes.OCEAN);
+        if (temp > -0.5) return biomeGetter.getOrThrow(Biomes.COLD_OCEAN);
+        return biomeGetter.getOrThrow(Biomes.FROZEN_OCEAN);
+    }
+
     public Holder<Biome> selectRiverBiome(double temp, double humid, double precip) {
         if (temp < -0.3) return biomeGetter.getOrThrow(Biomes.FROZEN_RIVER);
         return biomeGetter.getOrThrow(Biomes.RIVER);

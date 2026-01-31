@@ -5,8 +5,10 @@ import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.sheetworld.Sheetworld;
 import com.sheetworld.climate.BiomeRegistry;
+import com.sheetworld.climate.ModCompat;
 import com.sheetworld.climate.TerrainBiomeSelector;
 import com.sheetworld.climate.TerrainParameters;
+import com.sheetworld.ecoregion.EcoregionBiomePool;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.registries.Registries;
@@ -50,16 +52,45 @@ public class SheetworldBiomeSource extends BiomeSource {
     private static final double HADLEY_END = 0.30;
     private static final double FERREL_END = 0.60;
 
+    // === HUMIDITY THRESHOLD ===
+    // Continental drying kicks in past this continentalness value
+    private static final float INLAND_THRESHOLD = 0.3f;
+
+    // === RAIN SHADOW SETTINGS ===
+    // Distance upwind to check for blocking mountains (in blocks)
+    private static final int RAIN_SHADOW_DISTANCE = 400;
+    // How many sample points upwind to check
+    private static final int RAIN_SHADOW_SAMPLES = 3;
+    // PV threshold for "peak" detection (high weirdness = peaks)
+    private static final float PEAK_PV_THRESHOLD = 0.4f;
+    // Erosion threshold - low erosion = rugged/mountainous
+    private static final float PEAK_EROSION_THRESHOLD = 0.2f;
+    // Maximum precipitation reduction from rain shadow
+    private static final double MAX_RAIN_SHADOW_REDUCTION = 0.5;
+
     public SheetworldBiomeSource(HolderGetter<Biome> biomeGetter, int worldSize) {
         this.biomeGetter = biomeGetter;
         this.worldSize = worldSize;
         this.halfSize = worldSize / 2;
 
-        // Create the registry and selector
+        // Create the registry and biome pool
         BiomeRegistry registry = new BiomeRegistry(biomeGetter);
-        this.terrainSelector = new TerrainBiomeSelector(registry);
+        EcoregionBiomePool biomePool = new EcoregionBiomePool(biomeGetter);
 
-        Sheetworld.LOGGER.info("SheetworldBiomeSource created with TerrainBiomeSelector: worldSize={}", worldSize);
+        // Register modded biomes if available
+        if (ModCompat.hasAtmospheric()) {
+            biomePool.registerAtmosphericBiomes();
+        }
+        if (ModCompat.hasEnvironmental()) {
+            biomePool.registerEnvironmentalBiomes();
+        }
+        if (ModCompat.hasAutumnity()) {
+            biomePool.registerAutumnityBiomes();
+        }
+
+        this.terrainSelector = new TerrainBiomeSelector(registry, biomePool);
+
+        Sheetworld.LOGGER.info("SheetworldBiomeSource created with TerrainBiomeSelector + EcoregionBiomePool: worldSize={}", worldSize);
     }
 
     @Override
@@ -155,10 +186,10 @@ public class SheetworldBiomeSource extends BiomeSource {
         float erosion = Climate.unquantizeCoord(target.erosion());
         float weirdness = Climate.unquantizeCoord(target.weirdness());
 
-        // Calculate climate (latitude-based temp, circulation-based precip)
+        // Calculate climate (latitude-based temp, continentalness-based humidity, circulation-based precip)
         double temperature = getTemperature(z);
-        double humidity = getPrecipitation(x, z);
-        double precipitation = humidity;
+        double humidity = getHumidity(x, z, continentalness);
+        double precipitation = getPrecipitation(x, z, sampler, quartY);
 
         // Let TerrainBiomeSelector handle ALL the gating logic
         return terrainSelector.selectBiome(
@@ -180,10 +211,67 @@ public class SheetworldBiomeSource extends BiomeSource {
     }
 
     /**
-     * Base precipitation based on atmospheric circulation.
-     * Range: 0.0 (desert) to 1.0 (rainforest)
+     * Humidity - the moisture content of the air.
+     *
+     * This affects vegetation lushness and the "feel" of biomes.
+     * NOT the same as precipitation (rainfall)!
+     *
+     * A coastal desert can have humid air (fog) but no rain.
+     * An inland forest can have dry air but regular rain.
+     *
+     * Factors:
+     * 1. Temperature: Warm air CAN hold more moisture (Clausius-Clapeyron)
+     * 2. Ocean proximity: Coastal areas have humid air (moisture source)
+     * 3. Continental interior: Deep inland = dry air (moisture depleted)
+     * 4. Subtropical high: Air descending at ~30% latitude is dry
+     *
+     * @return humidity from 0.0 (bone dry) to 1.0 (saturated)
      */
-    private double getPrecipitation(int x, int z) {
+    private double getHumidity(int x, int z, float continentalness) {
+        double temp = getTemperature(z);
+        double latitude = Math.abs(z) / (double) halfSize;
+
+        // Base humidity: moderate, slightly higher in warm areas
+        // Range: 0.35 (cold) to 0.55 (hot)
+        double baseHumidity = 0.45 + (temp * 0.1);
+
+        // Coastal boost: ocean is a moisture source
+        // Near ocean (low continentalness) = humid air
+        double coastalEffect = 0.0;
+        if (continentalness < TerrainParameters.COAST_THRESHOLD) {
+            // Right at coast - very humid
+            coastalEffect = 0.25;
+        } else if (continentalness < INLAND_THRESHOLD) {
+            // Gradual decrease from coast to inland
+            double t = (continentalness - TerrainParameters.COAST_THRESHOLD) /
+                       (INLAND_THRESHOLD - TerrainParameters.COAST_THRESHOLD);
+            coastalEffect = 0.25 * (1.0 - t);
+        } else {
+            // Deep inland - continental drying (DRY air)
+            double inlandFactor = Math.min((continentalness - INLAND_THRESHOLD) * 2.5, 1.0);
+            coastalEffect = -0.2 * inlandFactor;
+        }
+
+        // Subtropical drying: the subtropical high pressure zones have DRY air
+        // This is separate from precipitation - the air itself is dry
+        double subtropicalDist = Math.abs(latitude - HADLEY_END);
+        double subtropicalDrying = Math.exp(-subtropicalDist * subtropicalDist * 80) * -0.15;
+
+        // Local variation for organic patterns
+        double localVariation = getLocalVariation(x, z, 0.0023, 0.0019) * 0.08;
+
+        return clamp(baseHumidity + coastalEffect + subtropicalDrying + localVariation, 0.0, 1.0);
+    }
+
+    /**
+     * Base precipitation based on atmospheric circulation + rain shadow effects.
+     * Range: 0.0 (desert) to 1.0 (rainforest)
+     *
+     * Rain shadows occur when moist air hits mountains and is forced upward,
+     * dumping precipitation on the windward side. The leeward side receives
+     * significantly less rainfall.
+     */
+    private double getPrecipitation(int x, int z, Climate.Sampler sampler, int quartY) {
         double latitude = Math.abs(z) / (double) halfSize;
         latitude = Math.min(latitude, 1.0);
         double longitude = x / (double) halfSize;
@@ -207,7 +295,71 @@ public class SheetworldBiomeSource extends BiomeSource {
             precipitation *= (1.0 - polarFactor * 0.4);
         }
 
+        // Rain shadow effect - check for blocking peaks upwind
+        if (sampler != null) {
+            double rainShadowReduction = calculateRainShadow(x, z, latitude, sampler, quartY);
+            precipitation *= (1.0 - rainShadowReduction);
+        }
+
         return clamp(precipitation, 0.0, 1.0);
+    }
+
+    /**
+     * Calculate rain shadow effect by sampling terrain upwind.
+     *
+     * Wind direction is determined by atmospheric circulation:
+     * - 0-30% latitude: Trade winds blow FROM the east (sample east)
+     * - 30-60% latitude: Westerlies blow FROM the west (sample west)
+     * - 60-100% latitude: Polar easterlies FROM the east (sample east)
+     *
+     * @return reduction factor from 0.0 (no shadow) to MAX_RAIN_SHADOW_REDUCTION
+     */
+    private double calculateRainShadow(int x, int z, double latitude, Climate.Sampler sampler, int quartY) {
+        // Determine wind direction based on latitude
+        // windDirX: positive = wind comes from east, negative = wind comes from west
+        int windDirX;
+        if (latitude < HADLEY_END) {
+            windDirX = 1;  // Trade winds - sample to the east (upwind)
+        } else if (latitude < FERREL_END) {
+            windDirX = -1; // Westerlies - sample to the west (upwind)
+        } else {
+            windDirX = 1;  // Polar easterlies - sample to the east (upwind)
+        }
+
+        // Sample upwind at multiple distances to find blocking peaks
+        double maxBlockingFactor = 0.0;
+        int stepDistance = RAIN_SHADOW_DISTANCE / RAIN_SHADOW_SAMPLES;
+
+        for (int i = 1; i <= RAIN_SHADOW_SAMPLES; i++) {
+            int sampleX = x + (windDirX * stepDistance * i);
+            int sampleZ = z;
+
+            // Convert to quart coordinates for sampler
+            int sampleQuartX = sampleX / 4;
+            int sampleQuartZ = sampleZ / 4;
+
+            // Sample terrain at upwind position
+            Climate.TargetPoint upwindTarget = sampler.sample(sampleQuartX, quartY, sampleQuartZ);
+            float upwindWeirdness = Climate.unquantizeCoord(upwindTarget.weirdness());
+            float upwindErosion = Climate.unquantizeCoord(upwindTarget.erosion());
+
+            // Calculate PV from weirdness
+            float upwindPV = TerrainParameters.calculatePV(upwindWeirdness);
+
+            // Check if this is a peak (high PV + low erosion = rugged mountain)
+            if (upwindPV > PEAK_PV_THRESHOLD && upwindErosion < PEAK_EROSION_THRESHOLD) {
+                // This is a blocking peak!
+                // Closer peaks have more effect, and higher/more rugged peaks block more
+                double distanceFactor = 1.0 - ((double)(i - 1) / RAIN_SHADOW_SAMPLES);
+                double peakStrength = (upwindPV - PEAK_PV_THRESHOLD) / (1.0f - PEAK_PV_THRESHOLD);
+                double erosionFactor = 1.0 - (upwindErosion / PEAK_EROSION_THRESHOLD);
+
+                double blockingFactor = distanceFactor * peakStrength * erosionFactor;
+                maxBlockingFactor = Math.max(maxBlockingFactor, blockingFactor);
+            }
+        }
+
+        return maxBlockingFactor * MAX_RAIN_SHADOW_REDUCTION;
     }
 
     private double getWindPrecipitationEffect(double latitude, double longitude) {
@@ -244,6 +396,13 @@ public class SheetworldBiomeSource extends BiomeSource {
         return h1 + h2 + h3;
     }
 
+    private double getLocalVariation(int x, int z, double freqX, double freqZ) {
+        double h1 = Math.sin(x * freqX + z * freqZ) * 0.5;
+        double h2 = Math.sin(x * freqX * 1.7 - z * freqZ * 1.3 + 1.7) * 0.3;
+        double h3 = Math.cos(x * freqX * 0.6 + z * freqZ * 0.8 + 2.3) * 0.2;
+        return h1 + h2 + h3;
+    }
+
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -252,10 +411,11 @@ public class SheetworldBiomeSource extends BiomeSource {
 
     public String getTerrainDebugInfo(int x, int z, float continentalness, float erosion, float weirdness) {
         double temperature = getTemperature(z);
-        double precipitation = getPrecipitation(x, z);
+        double humidity = getHumidity(x, z, continentalness);
+        double precipitation = getPrecipitation(x, z, null, 0);  // No rain shadow in debug (no sampler)
 
         return TerrainParameters.getDebugString(continentalness, erosion, weirdness) +
-            String.format(" | Climate: T=%.2f P=%.2f", temperature, precipitation);
+            String.format(" | Climate: T=%.2f H=%.2f P=%.2f", temperature, humidity, precipitation);
     }
 
     public int getWorldSize() {

@@ -2,34 +2,38 @@ package com.sheetworld.climate;
 
 import com.sheetworld.climate.TerrainParameters.ContinentalnessLevel;
 import com.sheetworld.climate.TerrainParameters.PVLevel;
+import com.sheetworld.ecoregion.Ecoregion;
+import com.sheetworld.ecoregion.EcoregionBiomePool;
+import com.sheetworld.ecoregion.EcoregionSelector;
 import net.minecraft.core.Holder;
 import net.minecraft.world.level.biome.Biome;
 
 /**
  * Terrain-based biome selection using vanilla's lookup table approach.
- * 
+ *
  * This implements the hard gate system:
  * 1. Continentalness determines ocean/coast/land
- * 2. PV (peaks/valleys) determines terrain shape  
+ * 2. PV (peaks/valleys) determines terrain shape
  * 3. Erosion determines mountain vs flat within each category
- * 4. Climate (temp/humid/precip) picks the specific biome
- * 
- * SIMPLIFIED CATEGORIES:
- * - Ocean/DeepOcean: Temperature only
- * - Beach: Coastal + flat + climate (includes mangroves!)
- * - Cliff: Coastal + rugged
- * - River: Valleys at any continentalness
- * - Peak: High PV + low erosion
- * - Slope: Mountain sides
- * - Shattered: Windswept terrain
- * - Land: EVERYTHING ELSE - climate does all the work here
+ * 4. Climate (temp/humid/precip) picks the specific biome via ecoregion system
+ *
+ * TERRAIN GATES:
+ * - Ocean/DeepOcean: Temperature-based ocean selection
+ * - Coast: Beaches/cliffs based on erosion
+ * - River: Valleys → river biomes
+ * - Peak: ALPINE_TUNDRA ecoregion
+ * - Slope: MONTANE_FOREST ecoregion
+ * - Shattered: EcoregionSelector picks ecoregion
+ * - Land: EcoregionSelector picks ecoregion based on TPH
  */
 public class TerrainBiomeSelector {
-    
+
     private final BiomeRegistry registry;
-    
-    public TerrainBiomeSelector(BiomeRegistry registry) {
+    private final EcoregionBiomePool biomePool;
+
+    public TerrainBiomeSelector(BiomeRegistry registry, EcoregionBiomePool biomePool) {
         this.registry = registry;
+        this.biomePool = biomePool;
     }
     
     /**
@@ -71,30 +75,40 @@ public class TerrainBiomeSelector {
         }
         
         // === PEAKS (high PV + low erosion) ===
-        
+
         if (pvLevel == PVLevel.PEAKS && erosionLevel <= 1) {
             return registry.selectPeakBiome(temp, humid, precip);
         }
-        
-        // === SLOPES (mountain sides) ===
-        
-        if ((pvLevel == PVLevel.PEAKS || pvLevel == PVLevel.HIGH) && erosionLevel <= 3) {
-            return registry.selectSlopeBiome(temp, humid, precip);
+
+        // === SLOPES ===
+        // High PV with low erosion - temperature gated for montane
+        if (pvLevel == PVLevel.HIGH && erosionLevel <= 1) {
+            if (temp < 0.0) {
+                // Cold elevated terrain → montane
+                if (erosionLevel == 0 && contLevel != ContinentalnessLevel.NEAR_INLAND) {
+                    return biomePool.selectBiome(Ecoregion.ALPINE_TUNDRA, temp, humid, precip);
+                }
+                return biomePool.selectBiome(Ecoregion.MONTANE_FOREST, temp, humid, precip);
+            }
+            // Warm/hot elevated terrain → regular ecoregion (savanna plateau, badlands, etc.)
+            Ecoregion eco = EcoregionSelector.select(temp, precip, 0.0);
+            return biomePool.selectBiome(eco, temp, humid, precip);
         }
-        
-        if (pvLevel == PVLevel.MID && erosionLevel <= 1) {
-            return registry.selectSlopeBiome(temp, humid, precip);
+
+        // Mid PV slopes - only cold temps get montane
+        if (pvLevel == PVLevel.MID && erosionLevel <= 1 && temp < -0.3) {
+            return biomePool.selectBiome(Ecoregion.MONTANE_FOREST, temp, humid, precip);
         }
-        
-        // === SHATTERED (high erosion + mid-high PV = windswept) ===
-        
-        if (erosionLevel == 5 && (pvLevel == PVLevel.MID || pvLevel == PVLevel.HIGH)) {
-            return registry.selectShatteredBiome(temp, humid, precip);
+
+        // === SHATTERED (E=5 at elevated terrain) ===
+        if (erosionLevel == 5 && (pvLevel == PVLevel.MID || pvLevel == PVLevel.HIGH || pvLevel == PVLevel.PEAKS)) {
+            Ecoregion eco = EcoregionSelector.select(temp, precip, 0.0);
+            return biomePool.selectBiome(eco, temp, humid, precip);
         }
-        
-        // === LAND (everything else - climate does the work) ===
-        
-        return registry.selectLandBiome(temp, humid, precip);
+
+        // === LAND (everything else - including most HIGH/PEAKS terrain) ===
+        Ecoregion eco = EcoregionSelector.select(temp, precip, 0.0);
+        return biomePool.selectBiome(eco, temp, humid, precip);
     }
     
     /**
@@ -108,21 +122,23 @@ public class TerrainBiomeSelector {
      */
     private Holder<Biome> selectCoastalBiome(PVLevel pvLevel, int erosionLevel,
             double temp, double humid, double precip) {
-        
+
         // Rivers meeting the ocean
         if (pvLevel == PVLevel.VALLEYS) {
             return registry.selectRiverBiome(temp, humid, precip);
         }
-        
-        // Peaks/High terrain at coast = land biomes or slopes
+
+        // Peaks at coast
         if (pvLevel == PVLevel.PEAKS) {
-            return registry.selectSlopeBiome(temp, humid, precip);
+            return registry.selectPeakBiome(temp, humid, precip);
         }
-        
+
+        // High terrain at coast = land biomes reaching the sea
         if (pvLevel == PVLevel.HIGH) {
-            return registry.selectLandBiome(temp, humid, precip);
+            Ecoregion eco = EcoregionSelector.select(temp, precip, 0.0);
+            return biomePool.selectBiome(eco, temp, humid, precip);
         }
-        
+
         // Low/Mid terrain at coast - beaches vs cliffs based on erosion
         if (erosionLevel <= 2) {
             // Rugged coast - cliffs
